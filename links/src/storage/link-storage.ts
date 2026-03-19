@@ -31,4 +31,23 @@ try {
 
 }
 
-export const linkStorage = {get,save}
+
+async function remove(id: string) {
+  try {
+    const storage = await get();
+    console.log("Storage antes da exclusão:", storage.length, "itens");
+    
+    // Força a comparação como String para evitar erro de tipo
+    const updated = storage.filter((link) => String(link.id) !== String(id));
+    
+    console.log("Storage após o filtro:", updated.length, "itens");
+
+    await AsyncStorage.setItem(LINKS_STORAGE_KEY, JSON.stringify(updated));
+    console.log("AsyncStorage atualizado com sucesso!");
+  } catch (error) {
+    throw error;
+  }
+}
+
+
+export const linkStorage = {get,save,remove}
