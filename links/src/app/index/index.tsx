@@ -126,6 +126,44 @@ export default function Index() {
         </View>
       </View>
 
+      <View style={{
+        flexDirection: "row",
+        marginHorizontal: 24,
+        marginBottom: 18,
+        backgroundColor: colors.gray[900],
+        padding: 5,
+        borderRadius: 14,
+      }}>
+        <View style={{
+          flex: 1,
+          minHeight: 42,
+          borderRadius: 10,
+          flexDirection: "row",
+          gap: 7,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: colors.gray[800],
+        }}>
+          <MaterialIcons name="link" size={19} color={colors.green[300]} />
+          <Text style={{ color: colors.green[300], fontWeight: "700" }}>Links</Text>
+        </View>
+        <TouchableOpacity
+          style={{
+            flex: 1,
+            minHeight: 42,
+            borderRadius: 10,
+            flexDirection: "row",
+            gap: 7,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+          onPress={() => router.push("/notes")}
+        >
+          <MaterialIcons name="description" size={19} color={colors.gray[400]} />
+          <Text style={{ color: colors.gray[400], fontWeight: "600" }}>Anotações</Text>
+        </TouchableOpacity>
+      </View>
+
       <Categories onChange={setCategory} selected={category} />
 
       <FlatList
