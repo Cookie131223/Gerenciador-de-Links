@@ -337,7 +337,7 @@ const styles = StyleSheet.create({
   textArea: { minHeight: 230, borderWidth: 1, borderColor: colors.gray[800], backgroundColor: colors.gray[900], color: colors.gray[100], borderRadius: 12, padding: 16, fontSize: 15, lineHeight: 23 },
   label: { color: colors.gray[400], fontSize: 13, fontWeight: "600", marginTop: 4 },
   categories: { flexDirection: "row", flexWrap: "wrap", gap: 9, marginBottom: 8 },
-  choice: { borderWidth: 1, borderColor: colors.gray[700] ?? colors.gray[600], paddingHorizontal: 13, paddingVertical: 8, borderRadius: 999 },
+  choice: { borderWidth: 1, borderColor: colors.gray[600], paddingHorizontal: 13, paddingVertical: 8, borderRadius: 999 },
   choiceActive: { backgroundColor: colors.green[900], borderColor: colors.green[300] },
   choiceText: { color: colors.gray[400], fontSize: 13 },
   choiceTextActive: { color: colors.green[300], fontWeight: "700" },
