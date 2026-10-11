@@ -25,6 +25,46 @@ async function parse(res) {
 function getSession(){ try{return JSON.parse(localStorage.getItem(SESSION_KEY)||"null")}catch{return null} }
 function saveSession(s){ localStorage.setItem(SESSION_KEY,JSON.stringify(s)) }
 function clearSession(){ localStorage.removeItem(SESSION_KEY) }
+
+async function refreshStoredSession(){
+  const current=getSession();
+  if(!current?.refresh_token) throw new Error("Sessão expirada.");
+
+  const res=await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`,{
+    method:"POST",
+    headers:{apikey:SUPABASE_KEY,"Content-Type":"application/json"},
+    body:JSON.stringify({refresh_token:current.refresh_token})
+  });
+
+  const fresh=await parse(res);
+  saveSession(fresh);
+  return fresh;
+}
+
+async function authorizedFetch(url,options={},retry=true){
+  let session=getSession();
+  if(!session?.access_token) throw new Error("Sessão expirada.");
+
+  let res=await fetch(url,{
+    ...options,
+    headers:{...(options.headers||{}),...headers(session.access_token,options.prefer)}
+  });
+
+  if(res.status===401 && retry && session.refresh_token){
+    try{
+      session=await refreshStoredSession();
+      res=await fetch(url,{
+        ...options,
+        headers:{...(options.headers||{}),...headers(session.access_token,options.prefer)}
+      });
+    }catch{
+      clearSession();
+      throw new Error("Sessão expirada.");
+    }
+  }
+
+  return res;
+}
 function escapeHtml(v=""){ return String(v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c])) }
 function normalizeUrl(url){ return /^https?:\/\//i.test(url)?url:`https://${url}` }
 
@@ -84,7 +124,7 @@ async function loadLinks(){
   const s=getSession();
   const params=new URLSearchParams({select:"*",order:"created_at.desc"});
   if(currentCategory!=="Todos")params.set("category",`eq.${currentCategory}`);
-  const res=await fetch(`${SUPABASE_URL}/rest/v1/links?${params}`,{headers:headers(s.access_token)});
+  const res=await authorizedFetch(`${SUPABASE_URL}/rest/v1/links?${params}`);
   if(res.status===401){clearSession();return renderAuth()}
   currentLinks=await parse(res);
   renderLinks();
@@ -93,7 +133,7 @@ async function loadLinks(){
 async function loadNotes(){
   const s=getSession();
   const params=new URLSearchParams({select:"*",order:"pinned.desc,updated_at.desc"});
-  const res=await fetch(`${SUPABASE_URL}/rest/v1/notes?${params}`,{headers:headers(s.access_token)});
+  const res=await authorizedFetch(`${SUPABASE_URL}/rest/v1/notes?${params}`);
   if(res.status===401){clearSession();return renderAuth()}
   currentNotes=await parse(res);
   renderNotes();
@@ -168,12 +208,12 @@ function showLinkModal(link=null){
 }
 async function saveLink(id,data){
   const s=getSession(),url=id?`${SUPABASE_URL}/rest/v1/links?id=eq.${encodeURIComponent(id)}`:`${SUPABASE_URL}/rest/v1/links`;
-  const res=await fetch(url,{method:id?"PATCH":"POST",headers:headers(s.access_token,"return=representation"),body:JSON.stringify(id?data:{...data,user_id:s.user.id})});
+  const res=await authorizedFetch(url,{method:id?"PATCH":"POST",prefer:"return=representation",body:JSON.stringify(id?data:{...data,user_id:s.user.id})});
   await parse(res);
 }
 async function deleteLink(id){
   const s=getSession();
-  const res=await fetch(`${SUPABASE_URL}/rest/v1/links?id=eq.${encodeURIComponent(id)}`,{method:"DELETE",headers:headers(s.access_token)});
+  const res=await authorizedFetch(`${SUPABASE_URL}/rest/v1/links?id=eq.${encodeURIComponent(id)}`,{method:"DELETE"});
   if(!res.ok)await parse(res);await loadLinks();
 }
 
@@ -228,16 +268,16 @@ function showNoteModal(note=null){
 }
 async function saveNote(data){
   const s=getSession();
-  await parse(await fetch(`${SUPABASE_URL}/rest/v1/notes`,{method:"POST",headers:headers(s.access_token,"return=representation"),body:JSON.stringify({...data,user_id:s.user.id})}));
+  await parse(await authorizedFetch(`${SUPABASE_URL}/rest/v1/notes`,{method:"POST",prefer:"return=representation",body:JSON.stringify({...data,user_id:s.user.id})}));
 }
 async function updateNote(id,data,reload=true){
   const s=getSession();
-  await parse(await fetch(`${SUPABASE_URL}/rest/v1/notes?id=eq.${encodeURIComponent(id)}`,{method:"PATCH",headers:headers(s.access_token,"return=representation"),body:JSON.stringify({...data,updated_at:new Date().toISOString()})}));
+  await parse(await authorizedFetch(`${SUPABASE_URL}/rest/v1/notes?id=eq.${encodeURIComponent(id)}`,{method:"PATCH",prefer:"return=representation",body:JSON.stringify({...data,updated_at:new Date().toISOString()})}));
   if(reload)await loadNotes();
 }
 async function deleteNote(id){
   const s=getSession();
-  const res=await fetch(`${SUPABASE_URL}/rest/v1/notes?id=eq.${encodeURIComponent(id)}`,{method:"DELETE",headers:headers(s.access_token)});
+  const res=await authorizedFetch(`${SUPABASE_URL}/rest/v1/notes?id=eq.${encodeURIComponent(id)}`,{method:"DELETE"});
   if(!res.ok)await parse(res);await loadNotes();
 }
 
