@@ -1,6 +1,6 @@
 const { SUPABASE_URL, SUPABASE_KEY } = window.APP_CONFIG || {};
 const app = document.getElementById("app");
-const SESSION_KEY = "links-web-session";
+const SESSION_KEY = "links-web-session-v2";
 const linkCategories = ["Todos","Estudos","Trabalho","Pessoal","Tecnologia","Outros"];
 const noteCategories = ["Pessoal","Trabalho","Faculdade","Ideias"];
 let currentTab = "links";
