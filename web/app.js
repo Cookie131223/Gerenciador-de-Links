@@ -8,6 +8,8 @@ let currentCategory = "Todos";
 let currentLinks = [];
 let currentNotes = [];
 let currentPhotos = [];
+let currentPhotoGroups = [];
+let selectedPhotoGroup = null;
 let noteSearch = "";
 
 function headers(token, prefer) {
@@ -141,10 +143,13 @@ async function loadNotes(){
 }
 
 async function loadPhotos(){
-  const params=new URLSearchParams({select:"*",order:"created_at.desc"});
-  const res=await authorizedFetch(`${SUPABASE_URL}/rest/v1/photos?${params}`);
-  if(res.status===401){clearSession();return renderAuth()}
-  currentPhotos=await parse(res);
+  const [photosRes, groupsRes] = await Promise.all([
+    authorizedFetch(`${SUPABASE_URL}/rest/v1/photos?select=*&order=created_at.desc`),
+    authorizedFetch(`${SUPABASE_URL}/rest/v1/photo_groups?select=*&order=created_at.desc`)
+  ]);
+  if(photosRes.status===401 || groupsRes.status===401){clearSession();return renderAuth()}
+  currentPhotos=await parse(photosRes);
+  currentPhotoGroups=await parse(groupsRes);
   renderPhotos();
 }
 
@@ -325,7 +330,58 @@ async function hydratePhotoImages(){
 }
 
 function renderPhotos(){
-  const cards=currentPhotos.length?currentPhotos.map(p=>`
+  if(selectedPhotoGroup !== null){
+    return renderPhotoGroupView();
+  }
+
+  const groupCards=currentPhotoGroups.map(g=>{
+    const count=currentPhotos.filter(p=>p.group_id===g.id).length;
+    return `
+      <article class="group-card" data-open-group="${g.id}">
+        <div class="group-icon">📁</div>
+        <div>
+          <div class="item-name">${escapeHtml(g.name)}</div>
+          ${g.description?`<div class="note-content">${escapeHtml(g.description)}</div>`:""}
+          <div class="group-count">${count} ${count===1?"foto":"fotos"}</div>
+        </div>
+      </article>`;
+  }).join("");
+
+  const ungroupedCount=currentPhotos.filter(p=>!p.group_id).length;
+  const ungroupedCard=`
+    <article class="group-card" data-open-group="ungrouped">
+      <div class="group-icon">🗂️</div>
+      <div>
+        <div class="item-name">Sem grupo</div>
+        <div class="note-content">Fotos e comprovantes avulsos</div>
+        <div class="group-count">${ungroupedCount} ${ungroupedCount===1?"foto":"fotos"}</div>
+      </div>
+    </article>`;
+
+  renderShell(`
+    <div class="toolbar">
+      <div class="muted">Organize comprovantes por linha, cliente, armador ou processo</div>
+      <div class="toolbar-right">
+        <button class="btn btn-secondary" id="newGroup">+ Novo grupo</button>
+        <button class="btn btn-primary" id="newPhoto">+ Guardar foto</button>
+      </div>
+    </div>
+    <div class="group-grid">${groupCards}${ungroupedCard}</div>`);
+
+  document.getElementById("newGroup").onclick=()=>showGroupModal();
+  document.getElementById("newPhoto").onclick=()=>showPhotoModal();
+  document.querySelectorAll("[data-open-group]").forEach(card=>card.onclick=()=>{
+    selectedPhotoGroup=card.dataset.openGroup==="ungrouped"?"ungrouped":card.dataset.openGroup;
+    renderPhotos();
+  });
+}
+
+function renderPhotoGroupView(){
+  const isUngrouped=selectedPhotoGroup==="ungrouped";
+  const group=isUngrouped?null:currentPhotoGroups.find(g=>g.id===selectedPhotoGroup);
+  const photos=currentPhotos.filter(p=>isUngrouped?!p.group_id:p.group_id===selectedPhotoGroup);
+
+  const cards=photos.length?photos.map(p=>`
     <article class="photo-card">
       <div class="photo-thumb-wrap">
         <img class="photo-thumb" data-photo-img="${p.id}" alt="${escapeHtml(p.title)}">
@@ -338,16 +394,29 @@ function renderPhotos(){
           <button class="btn btn-danger" data-photo-delete="${p.id}">Excluir</button>
         </div>
       </div>
-    </article>`).join(""):`<div class="empty">Nenhuma foto salva ainda.<br><span class="muted">Guarde comprovantes e imagens importantes aqui.</span></div>`;
+    </article>`).join(""):`<div class="empty">Nenhuma foto neste grupo ainda.</div>`;
 
   renderShell(`
     <div class="toolbar">
-      <div class="muted">Fotos privadas salvas na sua conta</div>
-      <button class="btn btn-primary" id="newPhoto">+ Guardar foto</button>
+      <div>
+        <button class="btn btn-link back-btn" id="backGroups">← Voltar aos grupos</button>
+        <div class="item-name group-title">${escapeHtml(isUngrouped?"Sem grupo":group?.name||"Grupo")}</div>
+        ${group?.description?`<div class="muted">${escapeHtml(group.description)}</div>`:""}
+      </div>
+      <div class="toolbar-right">
+        ${!isUngrouped?`<button class="btn btn-danger" id="deleteGroup">Excluir grupo</button>`:""}
+        <button class="btn btn-primary" id="newPhotoInGroup">+ Guardar foto</button>
+      </div>
     </div>
     <div class="photo-grid">${cards}</div>`);
 
-  document.getElementById("newPhoto").onclick=()=>showPhotoModal();
+  document.getElementById("backGroups").onclick=()=>{selectedPhotoGroup=null;renderPhotos()};
+  document.getElementById("newPhotoInGroup").onclick=()=>showPhotoModal(isUngrouped?null:selectedPhotoGroup);
+  if(!isUngrouped){
+    document.getElementById("deleteGroup").onclick=async()=>{
+      if(confirm("Excluir este grupo? As fotos ficarão em Sem grupo.")) await deletePhotoGroup(selectedPhotoGroup);
+    };
+  }
   document.querySelectorAll("[data-photo-view]").forEach(b=>b.onclick=()=>viewPhoto(b.dataset.photoView));
   document.querySelectorAll("[data-photo-delete]").forEach(b=>b.onclick=async()=>{
     if(confirm("Excluir esta foto e o arquivo armazenado?")) await deletePhoto(b.dataset.photoDelete);
@@ -355,13 +424,65 @@ function renderPhotos(){
   hydratePhotoImages();
 }
 
-function showPhotoModal(){
+function showGroupModal(){
+  const wrap=document.createElement("div");
+  wrap.className="modal-backdrop";
+  wrap.innerHTML=`<div class="modal"><h2>Novo grupo</h2>
+    <form class="form" id="groupForm">
+      <input class="input" id="groupName" placeholder="Nome do grupo (ex.: CMA CGM)" required maxlength="120">
+      <textarea class="textarea photo-description" id="groupDescription" placeholder="Descrição opcional (ex.: Comprovantes da linha Ásia)"></textarea>
+      <div id="groupMessage" class="error"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="cancelGroup">Cancelar</button>
+        <button class="btn btn-primary" type="submit">Criar grupo</button>
+      </div>
+    </form>
+  </div>`;
+  document.body.appendChild(wrap);
+  document.getElementById("cancelGroup").onclick=()=>wrap.remove();
+  document.getElementById("groupForm").onsubmit=async e=>{
+    e.preventDefault();
+    try{
+      await createPhotoGroup(
+        document.getElementById("groupName").value.trim(),
+        document.getElementById("groupDescription").value.trim()
+      );
+      wrap.remove();
+      await loadPhotos();
+    }catch(err){
+      document.getElementById("groupMessage").textContent=err.message;
+    }
+  };
+}
+
+async function createPhotoGroup(name,description){
+  const s=getSession();
+  const res=await authorizedFetch(`${SUPABASE_URL}/rest/v1/photo_groups`,{
+    method:"POST",
+    prefer:"return=representation",
+    body:JSON.stringify({user_id:s.user.id,name,description})
+  });
+  await parse(res);
+}
+
+async function deletePhotoGroup(id){
+  const res=await authorizedFetch(`${SUPABASE_URL}/rest/v1/photo_groups?id=eq.${encodeURIComponent(id)}`,{method:"DELETE"});
+  if(!res.ok)await parse(res);
+  selectedPhotoGroup=null;
+  await loadPhotos();
+}
+
+function showPhotoModal(preselectedGroupId=null){
   const wrap=document.createElement("div");
   wrap.className="modal-backdrop";
   wrap.innerHTML=`<div class="modal"><h2>Guardar foto</h2>
     <form class="form" id="photoForm">
       <input class="input" id="photoTitle" placeholder="Título (ex.: Comprovante cliente X)" required maxlength="140">
       <textarea class="textarea photo-description" id="photoDescription" placeholder="Observação opcional"></textarea>
+      <select class="select" id="photoGroup">
+        <option value="">Sem grupo</option>
+        ${currentPhotoGroups.map(g=>`<option value="${g.id}" ${preselectedGroupId===g.id?"selected":""}>${escapeHtml(g.name)}</option>`).join("")}
+      </select>
       <label class="upload-box">
         <span>Selecionar foto</span>
         <small>JPG, PNG, WEBP ou HEIC • até 10 MB</small>
@@ -381,6 +502,7 @@ function showPhotoModal(){
     const file=document.getElementById("photoFile").files?.[0];
     const title=document.getElementById("photoTitle").value.trim();
     const description=document.getElementById("photoDescription").value.trim();
+    const groupId=document.getElementById("photoGroup").value||null;
     const msg=document.getElementById("photoMessage");
     const btn=document.getElementById("savePhoto");
     if(!file)return;
@@ -388,7 +510,7 @@ function showPhotoModal(){
     if(!file.type.startsWith("image/") && !/\.heic$/i.test(file.name)){msg.textContent="Selecione um arquivo de imagem.";return}
     try{
       btn.disabled=true;btn.textContent="Enviando...";
-      await uploadPhoto(file,title,description);
+      await uploadPhoto(file,title,description,groupId);
       wrap.remove();
       await loadPhotos();
     }catch(err){
@@ -398,7 +520,7 @@ function showPhotoModal(){
   };
 }
 
-async function uploadPhoto(file,title,description){
+async function uploadPhoto(file,title,description,groupId){
   const s=getSession();
   const safeName=file.name.replace(/[^a-zA-Z0-9._-]/g,"-");
   const path=`${s.user.id}/${Date.now()}-${safeName}`;
@@ -423,7 +545,8 @@ async function uploadPhoto(file,title,description){
         title,
         description,
         storage_path:path,
-        mime_type:file.type||null
+        mime_type:file.type||null,
+        group_id:groupId
       })
     });
     await parse(metaRes);
