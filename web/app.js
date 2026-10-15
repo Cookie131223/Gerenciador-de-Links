@@ -11,6 +11,7 @@ let currentPhotos = [];
 let currentPhotoGroups = [];
 let selectedPhotoGroup = null;
 let noteSearch = "";
+let currentNoteCategory = "Todos";
 
 function headers(token, prefer) {
   return {
@@ -235,7 +236,12 @@ async function deleteLink(id){
 
 function renderNotes(){
   const q=noteSearch.trim().toLowerCase();
-  const notes=currentNotes.filter(n=>!q||[n.title,n.content,n.category].some(v=>String(v||"").toLowerCase().includes(q)));
+  const notes=currentNotes.filter(n=>{
+    const matchesSearch=!q||[n.title,n.content,n.category].some(v=>String(v||"").toLowerCase().includes(q));
+    const matchesCategory=currentNoteCategory==="Todos"||n.category===currentNoteCategory;
+    return matchesSearch&&matchesCategory;
+  });
+  const chips=["Todos",...noteCategories].map(c=>`<button class="chip ${c===currentNoteCategory?"active":""}" data-note-cat="${c}">${c}</button>`).join("");
   const cards=notes.length?notes.map(n=>`
     <article class="item-card">
       <div class="item-row"><div>
@@ -252,8 +258,13 @@ function renderNotes(){
     </article>`).join(""):`<div class="empty">${q?"Nenhuma anotação encontrada.":"Nenhuma anotação ainda."}</div>`;
   renderShell(`
     <div class="toolbar"><div class="muted">Anotações sincronizadas entre seus dispositivos</div><button class="btn btn-primary" id="newNote">+ Nova anotação</button></div>
+    <div class="filters">${chips}</div>
     <input class="input search" id="noteSearch" placeholder="Buscar nas anotações..." value="${escapeHtml(noteSearch)}">
     <div class="list">${cards}</div>`);
+  document.querySelectorAll("[data-note-cat]").forEach(b=>b.onclick=()=>{
+    currentNoteCategory=b.dataset.noteCat;
+    renderNotes();
+  });
   const search=document.getElementById("noteSearch");
   search.oninput=e=>{noteSearch=e.target.value;renderNotes();document.getElementById("noteSearch")?.focus()};
   document.getElementById("newNote").onclick=()=>showNoteModal();
