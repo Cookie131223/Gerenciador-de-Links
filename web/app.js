@@ -7,6 +7,7 @@ let currentTab = "links";
 let currentCategory = "Todos";
 let currentLinks = [];
 let currentNotes = [];
+let currentPhotos = [];
 let noteSearch = "";
 
 function headers(token, prefer) {
@@ -47,7 +48,7 @@ async function authorizedFetch(url,options={},retry=true){
 
   let res=await fetch(url,{
     ...options,
-    headers:{...(options.headers||{}),...headers(session.access_token,options.prefer)}
+    headers:{...headers(session.access_token,options.prefer),...(options.headers||{})}
   });
 
   if(res.status===401 && retry && session.refresh_token){
@@ -55,7 +56,7 @@ async function authorizedFetch(url,options={},retry=true){
       session=await refreshStoredSession();
       res=await fetch(url,{
         ...options,
-        headers:{...(options.headers||{}),...headers(session.access_token,options.prefer)}
+        headers:{...headers(session.access_token,options.prefer),...(options.headers||{})}
       });
     }catch{
       clearSession();
@@ -113,7 +114,8 @@ async function loadData(){
   if(!session?.access_token)return renderAuth();
   try{
     if(currentTab==="links") await loadLinks();
-    else await loadNotes();
+    else if(currentTab==="notes") await loadNotes();
+    else await loadPhotos();
   }catch(err){
     if(String(err.message).toLowerCase().includes("jwt")){clearSession();return renderAuth()}
     renderShell(`<div class="error">${escapeHtml(err.message)}</div>`);
@@ -131,12 +133,19 @@ async function loadLinks(){
 }
 
 async function loadNotes(){
-  const s=getSession();
   const params=new URLSearchParams({select:"*",order:"pinned.desc,updated_at.desc"});
   const res=await authorizedFetch(`${SUPABASE_URL}/rest/v1/notes?${params}`);
   if(res.status===401){clearSession();return renderAuth()}
   currentNotes=await parse(res);
   renderNotes();
+}
+
+async function loadPhotos(){
+  const params=new URLSearchParams({select:"*",order:"created_at.desc"});
+  const res=await authorizedFetch(`${SUPABASE_URL}/rest/v1/photos?${params}`);
+  if(res.status===401){clearSession();return renderAuth()}
+  currentPhotos=await parse(res);
+  renderPhotos();
 }
 
 function shell(content){
@@ -150,6 +159,7 @@ function shell(content){
     <div class="tabs">
       <button class="tab ${currentTab==="links"?"active":""}" id="tabLinks">Links</button>
       <button class="tab ${currentTab==="notes"?"active":""}" id="tabNotes">Anotações</button>
+      <button class="tab ${currentTab==="photos"?"active":""}" id="tabPhotos">Fotos</button>
     </div>
     ${content}
   </section>`;
@@ -158,6 +168,7 @@ function bindShell(){
   document.getElementById("logout").onclick=()=>{clearSession();renderAuth()};
   document.getElementById("tabLinks").onclick=()=>{currentTab="links";loadData()};
   document.getElementById("tabNotes").onclick=()=>{currentTab="notes";loadData()};
+  document.getElementById("tabPhotos").onclick=()=>{currentTab="photos";loadData()};
 }
 function renderShell(content){app.innerHTML=shell(content);bindShell()}
 
@@ -279,6 +290,173 @@ async function deleteNote(id){
   const s=getSession();
   const res=await authorizedFetch(`${SUPABASE_URL}/rest/v1/notes?id=eq.${encodeURIComponent(id)}`,{method:"DELETE"});
   if(!res.ok)await parse(res);await loadNotes();
+}
+
+
+function storagePathUrl(path){
+  return path.split("/").map(encodeURIComponent).join("/");
+}
+
+async function fetchPhotoBlob(path){
+  const url=`${SUPABASE_URL}/storage/v1/object/authenticated/receipts/${storagePathUrl(path)}`;
+  const res=await authorizedFetch(url,{headers:{"Content-Type":"application/octet-stream"}});
+  if(!res.ok){
+    let msg="Não foi possível carregar a foto.";
+    try{const data=await res.json();msg=data.message||data.error||msg}catch{}
+    throw new Error(msg);
+  }
+  return res.blob();
+}
+
+async function hydratePhotoImages(){
+  document.querySelectorAll("[data-photo-img]").forEach(async img=>{
+    const id=img.dataset.photoImg;
+    const photo=currentPhotos.find(p=>p.id===id);
+    if(!photo)return;
+    try{
+      const blob=await fetchPhotoBlob(photo.storage_path);
+      const objectUrl=URL.createObjectURL(blob);
+      img.src=objectUrl;
+      img.onload=()=>URL.revokeObjectURL(objectUrl);
+    }catch{
+      img.alt="Não foi possível carregar";
+    }
+  });
+}
+
+function renderPhotos(){
+  const cards=currentPhotos.length?currentPhotos.map(p=>`
+    <article class="photo-card">
+      <div class="photo-thumb-wrap">
+        <img class="photo-thumb" data-photo-img="${p.id}" alt="${escapeHtml(p.title)}">
+      </div>
+      <div class="photo-body">
+        <div class="item-name">${escapeHtml(p.title)}</div>
+        ${p.description?`<div class="note-content">${escapeHtml(p.description)}</div>`:""}
+        <div class="actions">
+          <button class="btn btn-secondary" data-photo-view="${p.id}">Visualizar</button>
+          <button class="btn btn-danger" data-photo-delete="${p.id}">Excluir</button>
+        </div>
+      </div>
+    </article>`).join(""):`<div class="empty">Nenhuma foto salva ainda.<br><span class="muted">Guarde comprovantes e imagens importantes aqui.</span></div>`;
+
+  renderShell(`
+    <div class="toolbar">
+      <div class="muted">Fotos privadas salvas na sua conta</div>
+      <button class="btn btn-primary" id="newPhoto">+ Guardar foto</button>
+    </div>
+    <div class="photo-grid">${cards}</div>`);
+
+  document.getElementById("newPhoto").onclick=()=>showPhotoModal();
+  document.querySelectorAll("[data-photo-view]").forEach(b=>b.onclick=()=>viewPhoto(b.dataset.photoView));
+  document.querySelectorAll("[data-photo-delete]").forEach(b=>b.onclick=async()=>{
+    if(confirm("Excluir esta foto e o arquivo armazenado?")) await deletePhoto(b.dataset.photoDelete);
+  });
+  hydratePhotoImages();
+}
+
+function showPhotoModal(){
+  const wrap=document.createElement("div");
+  wrap.className="modal-backdrop";
+  wrap.innerHTML=`<div class="modal"><h2>Guardar foto</h2>
+    <form class="form" id="photoForm">
+      <input class="input" id="photoTitle" placeholder="Título (ex.: Comprovante cliente X)" required maxlength="140">
+      <textarea class="textarea photo-description" id="photoDescription" placeholder="Observação opcional"></textarea>
+      <label class="upload-box">
+        <span>Selecionar foto</span>
+        <small>JPG, PNG, WEBP ou HEIC • até 10 MB</small>
+        <input id="photoFile" type="file" accept="image/*" required>
+      </label>
+      <div id="photoMessage" class="error"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="cancelPhoto">Cancelar</button>
+        <button class="btn btn-primary" type="submit" id="savePhoto">Salvar foto</button>
+      </div>
+    </form>
+  </div>`;
+  document.body.appendChild(wrap);
+  document.getElementById("cancelPhoto").onclick=()=>wrap.remove();
+  document.getElementById("photoForm").onsubmit=async e=>{
+    e.preventDefault();
+    const file=document.getElementById("photoFile").files?.[0];
+    const title=document.getElementById("photoTitle").value.trim();
+    const description=document.getElementById("photoDescription").value.trim();
+    const msg=document.getElementById("photoMessage");
+    const btn=document.getElementById("savePhoto");
+    if(!file)return;
+    if(file.size>10*1024*1024){msg.textContent="A foto deve ter no máximo 10 MB.";return}
+    if(!file.type.startsWith("image/") && !/\.heic$/i.test(file.name)){msg.textContent="Selecione um arquivo de imagem.";return}
+    try{
+      btn.disabled=true;btn.textContent="Enviando...";
+      await uploadPhoto(file,title,description);
+      wrap.remove();
+      await loadPhotos();
+    }catch(err){
+      msg.textContent=err.message;
+      btn.disabled=false;btn.textContent="Salvar foto";
+    }
+  };
+}
+
+async function uploadPhoto(file,title,description){
+  const s=getSession();
+  const safeName=file.name.replace(/[^a-zA-Z0-9._-]/g,"-");
+  const path=`${s.user.id}/${Date.now()}-${safeName}`;
+  const uploadUrl=`${SUPABASE_URL}/storage/v1/object/receipts/${storagePathUrl(path)}`;
+
+  const uploadRes=await authorizedFetch(uploadUrl,{
+    method:"POST",
+    headers:{"Content-Type":file.type||"application/octet-stream","x-upsert":"false"},
+    body:file
+  });
+  if(!uploadRes.ok){
+    let data={};try{data=await uploadRes.json()}catch{}
+    throw new Error(data.message||data.error||"Não foi possível enviar a foto.");
+  }
+
+  try{
+    const metaRes=await authorizedFetch(`${SUPABASE_URL}/rest/v1/photos`,{
+      method:"POST",
+      prefer:"return=representation",
+      body:JSON.stringify({
+        user_id:s.user.id,
+        title,
+        description,
+        storage_path:path,
+        mime_type:file.type||null
+      })
+    });
+    await parse(metaRes);
+  }catch(err){
+    await authorizedFetch(uploadUrl,{method:"DELETE"}).catch(()=>{});
+    throw err;
+  }
+}
+
+async function viewPhoto(id){
+  const photo=currentPhotos.find(p=>p.id===id);
+  if(!photo)return;
+  try{
+    const blob=await fetchPhotoBlob(photo.storage_path);
+    const url=URL.createObjectURL(blob);
+    const w=window.open(url,"_blank");
+    if(!w) location.href=url;
+    setTimeout(()=>URL.revokeObjectURL(url),60000);
+  }catch(err){alert(err.message)}
+}
+
+async function deletePhoto(id){
+  const photo=currentPhotos.find(p=>p.id===id);
+  if(!photo)return;
+  const objectUrl=`${SUPABASE_URL}/storage/v1/object/receipts/${storagePathUrl(photo.storage_path)}`;
+  const storageRes=await authorizedFetch(objectUrl,{method:"DELETE"});
+  if(!storageRes.ok){
+    let data={};try{data=await storageRes.json()}catch{}
+    throw new Error(data.message||data.error||"Não foi possível excluir o arquivo.");
+  }
+  const metaRes=await authorizedFetch(`${SUPABASE_URL}/rest/v1/photos?id=eq.${encodeURIComponent(id)}`,{method:"DELETE"});
+  if(!metaRes.ok)await parse(metaRes);
+  await loadPhotos();
 }
 
 window.addEventListener("error",e=>{console.error(e.error||e.message)});
