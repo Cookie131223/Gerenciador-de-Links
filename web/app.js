@@ -430,7 +430,12 @@ function renderPhotoGroupView(){
   }
   document.querySelectorAll("[data-photo-view]").forEach(b=>b.onclick=()=>viewPhoto(b.dataset.photoView));
   document.querySelectorAll("[data-photo-delete]").forEach(b=>b.onclick=async()=>{
-    if(confirm("Excluir esta foto e o arquivo armazenado?")) await deletePhoto(b.dataset.photoDelete);
+    if(!confirm("Excluir esta foto e o arquivo armazenado?"))return;
+    b.disabled=true;
+    b.textContent="Excluindo...";
+    try{await deletePhoto(b.dataset.photoDelete)}
+    catch(err){alert(err.message||"Não foi possível excluir a foto. Tente novamente.")}
+    finally{b.disabled=false;b.textContent="Excluir"}
   });
   hydratePhotoImages();
 }
@@ -562,7 +567,7 @@ async function uploadPhoto(file,title,description,groupId){
     });
     await parse(metaRes);
   }catch(err){
-    await authorizedFetch(uploadUrl,{method:"DELETE"}).catch(()=>{});
+    await removePhotoFile(path).catch(()=>{});
     throw err;
   }
 }
@@ -579,17 +584,26 @@ async function viewPhoto(id){
   }catch(err){alert(err.message)}
 }
 
+async function removePhotoFile(path){
+  const res=await authorizedFetch(`${SUPABASE_URL}/storage/v1/object/receipts`,{
+    method:"DELETE",
+    body:JSON.stringify({prefixes:[path]})
+  });
+  return parse(res);
+}
+
 async function deletePhoto(id){
   const photo=currentPhotos.find(p=>p.id===id);
   if(!photo)return;
-  const objectUrl=`${SUPABASE_URL}/storage/v1/object/receipts/${storagePathUrl(photo.storage_path)}`;
-  const storageRes=await authorizedFetch(objectUrl,{method:"DELETE"});
-  if(!storageRes.ok){
-    let data={};try{data=await storageRes.json()}catch{}
-    throw new Error(data.message||data.error||"Não foi possível excluir o arquivo.");
+  await removePhotoFile(photo.storage_path);
+  const metaRes=await authorizedFetch(`${SUPABASE_URL}/rest/v1/photos?id=eq.${encodeURIComponent(id)}`,{
+    method:"DELETE",
+    prefer:"return=representation"
+  });
+  const deleted=await parse(metaRes);
+  if(!Array.isArray(deleted)||!deleted.some(p=>p.id===id)){
+    throw new Error("O registro da foto não foi excluído. Atualize a página e tente novamente.");
   }
-  const metaRes=await authorizedFetch(`${SUPABASE_URL}/rest/v1/photos?id=eq.${encodeURIComponent(id)}`,{method:"DELETE"});
-  if(!metaRes.ok)await parse(metaRes);
   await loadPhotos();
 }
 
