@@ -188,7 +188,7 @@ function renderAuth(register=false,message=""){
       <input class="input" id="password" type="password" placeholder="Senha" minlength="6" required autocomplete="${register?"new-password":"current-password"}">
       <button class="btn btn-primary" type="submit">${register?"Criar conta":"Entrar"}</button>
     </form>
-    <button class="btn btn-link" id="toggleAuth">${register?"Já tem uma conta? Entrar":"Ainda não tem conta? Criar conta"}</button>
+    <button class="btn btn-link" id="toggleAuth" hidden>${register?"Já tem uma conta? Entrar":"Ainda não tem conta? Criar conta"}</button>
     <div id="authMessage" class="${message.includes("criada")?"success":"error"}">${escapeHtml(message)}</div>
   </div></section>`;
   document.getElementById("toggleAuth").onclick=()=>renderAuth(!register);
