@@ -3,13 +3,18 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <meta name="theme-color" content="#09090b" />
-  <title>Meu Hub</title>
-  <link rel="stylesheet" href="/style.css" />
+  <meta name="theme-color" content="#0a0204" />
+  <title>Meu Hub · Sexta-Feira</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css?v=2" />
 </head>
 <body>
-  <main id="app"><div class="boot">Carregando...</div></main>
+  <div class="hub-fundo" aria-hidden="true"></div>
+  <main id="app"><div class="boot"><span class="reator grande"></span><span class="boot-txt">INICIALIZANDO MÓDULO</span></div></main>
+  <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
   <script src="/config.js"></script>
-  <script src="/app.js"></script>
+  <script src="/app.js?v=2"></script>
 </body>
 </html>
