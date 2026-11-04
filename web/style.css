@@ -292,3 +292,17 @@ a{color:inherit}
 /* ---------- cores das categorias (ajuste aqui) ---------- */
 [data-cor][data-cor="Estudos"]{--c:#ffb547}[data-cor][data-cor="Trabalho"]{--c:#ff3b3b}[data-cor][data-cor="Pessoal"]{--c:#ff7ab6}
 [data-cor][data-cor="Tecnologia"]{--c:#38f2b0}[data-cor][data-cor="Outros"]{--c:#c08a86}[data-cor][data-cor="Faculdade"]{--c:#8fb8ff}[data-cor][data-cor="Ideias"]{--c:#c79bff}
+
+/* ===== arquivos (PDF, Word, Excel…) na aba Fotos ===== */
+.file-thumb{width:100%;height:100%;display:grid;place-items:center;align-content:center;gap:8px;background:radial-gradient(circle at 50% 55%,rgba(255,59,59,.12),transparent 70%)}
+.file-thumb svg,.capa .file-thumb svg{width:44px;height:44px;color:var(--arc)}
+.file-ext{font:12px var(--f-mono);letter-spacing:.16em;color:var(--arc-hi);border:1px solid var(--line-hi);border-radius:3px;padding:2px 8px;background:rgba(10,2,4,.6)}
+.photo-thumb-wrap:hover .file-thumb svg{transform:scale(1.06)}
+.file-thumb svg{transition:transform .3s}
+.file-name{font:12px var(--f-mono);color:var(--ink-dim);word-break:break-all}
+.lightbox-pdf{width:100%;height:100%;border:1px solid var(--line);border-radius:4px;background:#fff}
+.lightbox-img:has(.lightbox-pdf){place-items:stretch}
+.file-preview{display:grid;justify-items:center;gap:10px;padding:28px 24px;max-width:380px;text-align:center}
+.file-preview svg{width:56px;height:56px;color:var(--arc)}
+.file-preview .item-name{white-space:normal;word-break:break-all}
+.upload-box{min-width:0}.upload-box input{max-width:100%;min-width:0;width:100%}

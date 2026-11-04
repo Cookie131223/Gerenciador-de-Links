@@ -33,6 +33,8 @@ const ICON = {
   fechar: svg('<path d="M18 6 6 18M6 6l12 12"/>'),
   voltar: svg('<path d="M19 12H5M12 19l-7-7 7-7"/>'),
   ver: svg('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'),
+  arquivo: svg('<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/>'),
+  baixar: svg('<path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>'),
 };
 
 /* ================= Supabase (inalterado) ================= */
@@ -277,7 +279,7 @@ function shell(content){
       <div class="contadores">
         <span class="contador"><b data-cont="links">${cont("links")}</b>LINKS</span>
         <span class="contador"><b data-cont="notes">${cont("notes")}</b>NOTAS</span>
-        <span class="contador"><b data-cont="photos">${cont("photos")}</b>FOTOS</span>
+        <span class="contador"><b data-cont="photos">${cont("photos")}</b>ARQUIVOS</span>
       </div>
     </div>
     <nav class="tabs painel" aria-label="Seções">
@@ -474,16 +476,36 @@ async function deleteNote(id){
   if(!res.ok)await parse(res);await loadNotes();loadCounts();
 }
 
-/* ================= fotos ================= */
+/* ================= fotos e arquivos ================= */
+const MAX_FILE_MB = 10;
+const IMG_EXT = /\.(jpe?g|png|gif|webp|heic|heif|bmp|avif)$/i;
+
 function storagePathUrl(path){
   return path.split("/").map(encodeURIComponent).join("/");
 }
+// nome original (o caminho é "<user>/<timestamp>-<nome>")
+function nomeArquivo(p){
+  const base=(p.storage_path||"").split("/").pop()||"arquivo";
+  return base.replace(/^\d+-/,"");
+}
+function extensao(p){
+  const m=nomeArquivo(p).match(/\.([a-z0-9]{1,5})$/i);
+  return m?m[1].toUpperCase():"ARQ";
+}
+function isImagem(p){
+  if(p.mime_type) return p.mime_type.startsWith("image/");
+  return IMG_EXT.test(p.storage_path||"");
+}
+function isPdf(p){
+  return p.mime_type==="application/pdf" || /\.pdf$/i.test(p.storage_path||"");
+}
+function rotuloQtd(n){ return `${n} ${n===1?"ITEM":"ITENS"}` }
 
 async function fetchPhotoBlob(path){
   const url=`${SUPABASE_URL}/storage/v1/object/authenticated/receipts/${storagePathUrl(path)}`;
   const res=await authorizedFetch(url,{headers:{"Content-Type":"application/octet-stream"}});
   if(!res.ok){
-    let msg="Não foi possível carregar a foto.";
+    let msg="Não foi possível carregar o arquivo.";
     try{const data=await res.json();msg=data.message||data.error||msg}catch{}
     throw new Error(msg);
   }
@@ -506,18 +528,29 @@ async function hydratePhotoImages(){
   });
 }
 
+// miniatura: imagem real ou "ficha" do arquivo com a extensão
+function miniatura(p,classe="photo-thumb"){
+  if(isImagem(p)) return `<img class="${classe}" data-photo-img="${p.id}" alt="${escapeHtml(p.title)}">`;
+  return `<div class="file-thumb">${ICON.arquivo}<span class="file-ext">${escapeHtml(extensao(p))}</span></div>`;
+}
+
 function renderPhotos(){
   if(selectedPhotoGroup !== null){
     return renderPhotoGroupView();
   }
-  // capa = foto mais recente do grupo
-  const capa=fotos=>fotos[0]?`<img data-photo-img="${fotos[0].id}" alt="">`:ICON.pasta;
+  // capa = imagem mais recente do grupo; se só houver arquivos, mostra a ficha do arquivo
+  const capa=itens=>{
+    const img=itens.find(isImagem);
+    if(img) return `<img data-photo-img="${img.id}" alt="">`;
+    if(itens[0]) return miniatura(itens[0]);
+    return ICON.pasta;
+  };
   const grupos=[...currentPhotoGroups.map(g=>({id:g.id,nome:g.name,desc:g.description,fotos:currentPhotos.filter(p=>p.group_id===g.id)})),
-    {id:"ungrouped",nome:"Sem grupo",desc:"Fotos e comprovantes avulsos",fotos:currentPhotos.filter(p=>!p.group_id)}];
+    {id:"ungrouped",nome:"Sem grupo",desc:"Fotos, comprovantes e arquivos avulsos",fotos:currentPhotos.filter(p=>!p.group_id)}];
 
   const cards=grupos.map((g,i)=>`
       <button class="group-card painel entra" style="--i:${i}" data-open-group="${g.id}">
-        <div class="capa">${capa(g.fotos)}<span class="group-count">${g.fotos.length} ${g.fotos.length===1?"FOTO":"FOTOS"}</span></div>
+        <div class="capa">${capa(g.fotos)}<span class="group-count">${rotuloQtd(g.fotos.length)}</span></div>
         <div class="group-body">
           <div class="item-name">${escapeHtml(g.nome)}</div>
           ${g.desc?`<div class="note-content">${escapeHtml(g.desc)}</div>`:""}
@@ -526,10 +559,10 @@ function renderPhotos(){
 
   renderShell(`
     <div class="toolbar">
-      <div class="secao-h">Fotos e comprovantes<small>Organize por linha, cliente, armador ou processo</small></div>
+      <div class="secao-h">Fotos, comprovantes e arquivos<small>Organize por linha, cliente, armador ou processo</small></div>
       <div class="toolbar-right">
         <button class="btn btn-secondary" id="newGroup">${ICON.pasta}Novo grupo</button>
-        <button class="btn btn-primary" id="newPhoto">${ICON.mais}Guardar foto</button>
+        <button class="btn btn-primary" id="newPhoto">${ICON.mais}Guardar arquivo</button>
       </div>
     </div>
     <div class="group-grid">${cards}</div>`);
@@ -550,21 +583,23 @@ function renderPhotoGroupView(){
 
   const cards=photos.length?photos.map((p,i)=>`
     <article class="photo-card painel entra" style="--i:${i}">
-      <button class="photo-thumb-wrap" data-photo-view="${p.id}" aria-label="Ver ${escapeHtml(p.title)}">
-        <img class="photo-thumb" data-photo-img="${p.id}" alt="${escapeHtml(p.title)}">
+      <button class="photo-thumb-wrap" data-photo-view="${p.id}" aria-label="Abrir ${escapeHtml(p.title)}">
+        ${miniatura(p)}
       </button>
       <div class="photo-body">
         <div class="item-name">${escapeHtml(p.title)}</div>
+        ${!isImagem(p)?`<div class="file-name">${escapeHtml(nomeArquivo(p))}</div>`:""}
         ${p.description?`<div class="note-content">${escapeHtml(p.description)}</div>`:""}
         <div class="nota-rodape">
           <span class="data">${dataCurta(p.created_at)}</span>
           <div class="nota-acoes">
-            <button class="icone" data-photo-view="${p.id}" title="Ver" aria-label="Ver foto">${ICON.ver}</button>
-            <button class="icone perigo" data-photo-delete="${p.id}" title="Excluir" aria-label="Excluir foto">${ICON.lixo}</button>
+            <button class="icone" data-photo-view="${p.id}" title="Abrir" aria-label="Abrir">${ICON.ver}</button>
+            <button class="icone" data-photo-download="${p.id}" title="Baixar" aria-label="Baixar">${ICON.baixar}</button>
+            <button class="icone perigo" data-photo-delete="${p.id}" title="Excluir" aria-label="Excluir">${ICON.lixo}</button>
           </div>
         </div>
       </div>
-    </article>`).join(""):vazio("GRUPO VAZIO","Nenhuma foto neste grupo ainda.");
+    </article>`).join(""):vazio("GRUPO VAZIO","Nenhuma foto ou arquivo neste grupo ainda.");
 
   renderShell(`
     <div class="toolbar">
@@ -575,7 +610,7 @@ function renderPhotoGroupView(){
       </div>
       <div class="toolbar-right">
         ${!isUngrouped?`<button class="btn btn-danger" id="deleteGroup">${ICON.lixo}Excluir grupo</button>`:""}
-        <button class="btn btn-primary" id="newPhotoInGroup">${ICON.mais}Guardar foto</button>
+        <button class="btn btn-primary" id="newPhotoInGroup">${ICON.mais}Guardar arquivo</button>
       </div>
     </div>
     <div class="photo-grid">${cards}</div>`);
@@ -584,17 +619,22 @@ function renderPhotoGroupView(){
   document.getElementById("newPhotoInGroup").onclick=()=>showPhotoModal(isUngrouped?null:selectedPhotoGroup);
   if(!isUngrouped){
     document.getElementById("deleteGroup").onclick=async()=>{
-      if(await confirmar("Excluir grupo","O grupo será apagado e as fotos dele irão para “Sem grupo”.")){
+      if(await confirmar("Excluir grupo","O grupo será apagado e os itens dele irão para “Sem grupo”.")){
         try{await deletePhotoGroup(selectedPhotoGroup);toast("Grupo excluído.")}catch(err){toast(err.message,"erro")}
       }
     };
   }
   document.querySelectorAll("[data-photo-view]").forEach(b=>b.onclick=()=>viewPhoto(b.dataset.photoView));
-  document.querySelectorAll("[data-photo-delete]").forEach(b=>b.onclick=async()=>{
-    if(!await confirmar("Excluir foto","A foto e o arquivo armazenado serão apagados."))return;
+  document.querySelectorAll("[data-photo-download]").forEach(b=>b.onclick=async()=>{
     b.disabled=true;
-    try{await deletePhoto(b.dataset.photoDelete);toast("Foto excluída.")}
-    catch(err){toast(err.message||"Não foi possível excluir a foto. Tente novamente.","erro")}
+    try{await baixarArquivo(b.dataset.photoDownload)}catch(err){toast(err.message,"erro")}
+    finally{b.disabled=false}
+  });
+  document.querySelectorAll("[data-photo-delete]").forEach(b=>b.onclick=async()=>{
+    if(!await confirmar("Excluir item","O registro e o arquivo armazenado serão apagados."))return;
+    b.disabled=true;
+    try{await deletePhoto(b.dataset.photoDelete);toast("Item excluído.")}
+    catch(err){toast(err.message||"Não foi possível excluir. Tente novamente.","erro")}
     finally{b.disabled=false}
   });
   hydratePhotoImages();
@@ -653,29 +693,34 @@ async function deletePhotoGroup(id){
 function showPhotoModal(preselectedGroupId=null){
   const wrap=document.createElement("div");
   wrap.className="modal-backdrop";
-  wrap.innerHTML=`<div class="modal painel" role="dialog" aria-modal="true"><h2>Guardar foto</h2>
+  wrap.innerHTML=`<div class="modal painel" role="dialog" aria-modal="true"><h2>Guardar foto ou arquivo</h2>
     <form class="form" id="photoForm">
+      <label class="upload-box">
+        <span>Selecionar foto ou arquivo</span>
+        <small>Imagens, PDF, Word, Excel, XML, TXT, ZIP… • até ${MAX_FILE_MB} MB</small>
+        <input id="photoFile" type="file" required>
+      </label>
       <input class="input" id="photoTitle" placeholder="Título (ex.: Comprovante cliente X)" required maxlength="140">
       <textarea class="textarea photo-description" id="photoDescription" placeholder="Observação opcional"></textarea>
       <select class="select" id="photoGroup">
         <option value="">Sem grupo</option>
         ${currentPhotoGroups.map(g=>`<option value="${g.id}" ${preselectedGroupId===g.id?"selected":""}>${escapeHtml(g.name)}</option>`).join("")}
       </select>
-      <label class="upload-box">
-        <span>Selecionar foto</span>
-        <small>JPG, PNG, WEBP ou HEIC • até 10 MB</small>
-        <input id="photoFile" type="file" accept="image/*" required>
-      </label>
       <div id="photoMessage" class="error"></div>
       <div class="modal-actions">
         <button type="button" class="btn btn-secondary" id="cancelPhoto">Cancelar</button>
-        <button class="btn btn-primary" type="submit" id="savePhoto">Salvar foto</button>
+        <button class="btn btn-primary" type="submit" id="savePhoto">Salvar</button>
       </div>
     </form>
   </div>`;
   document.body.appendChild(wrap);
   const fechar=prepararModal(wrap);
   document.getElementById("cancelPhoto").onclick=fechar;
+  // preenche o título com o nome do arquivo, se estiver vazio
+  document.getElementById("photoFile").onchange=e=>{
+    const f=e.target.files?.[0];const t=document.getElementById("photoTitle");
+    if(f&&!t.value.trim())t.value=f.name.replace(/\.[^.]+$/,"").slice(0,140);
+  };
   document.getElementById("photoForm").onsubmit=async e=>{
     e.preventDefault();
     const file=document.getElementById("photoFile").files?.[0];
@@ -685,20 +730,26 @@ function showPhotoModal(preselectedGroupId=null){
     const msg=document.getElementById("photoMessage");
     const btn=document.getElementById("savePhoto");
     if(!file)return;
-    if(file.size>10*1024*1024){msg.textContent="A foto deve ter no máximo 10 MB.";return}
-    if(!file.type.startsWith("image/") && !/\.heic$/i.test(file.name)){msg.textContent="Selecione um arquivo de imagem.";return}
+    if(file.size>MAX_FILE_MB*1024*1024){msg.textContent=`O arquivo deve ter no máximo ${MAX_FILE_MB} MB.`;return}
     try{
       btn.disabled=true;btn.textContent="Enviando...";
       await uploadPhoto(file,title,description,groupId);
       fechar();
       await loadPhotos();
       loadCounts();
-      toast("Foto guardada.");
+      toast(file.type.startsWith("image/")?"Foto guardada.":"Arquivo guardado.");
     }catch(err){
       msg.textContent=err.message;
-      btn.disabled=false;btn.textContent="Salvar foto";
+      btn.disabled=false;btn.textContent="Salvar";
     }
   };
+}
+
+function mimeDoArquivo(file){
+  if(file.type)return file.type;
+  if(/\.heic$/i.test(file.name))return "image/heic";
+  if(/\.pdf$/i.test(file.name))return "application/pdf";
+  return "application/octet-stream";
 }
 
 async function uploadPhoto(file,title,description,groupId){
@@ -706,15 +757,16 @@ async function uploadPhoto(file,title,description,groupId){
   const safeName=file.name.replace(/[^a-zA-Z0-9._-]/g,"-");
   const path=`${s.user.id}/${Date.now()}-${safeName}`;
   const uploadUrl=`${SUPABASE_URL}/storage/v1/object/receipts/${storagePathUrl(path)}`;
+  const mime=mimeDoArquivo(file);
 
   const uploadRes=await authorizedFetch(uploadUrl,{
     method:"POST",
-    headers:{"Content-Type":file.type||"application/octet-stream","x-upsert":"false"},
+    headers:{"Content-Type":mime,"x-upsert":"false"},
     body:file
   });
   if(!uploadRes.ok){
     let data={};try{data=await uploadRes.json()}catch{}
-    throw new Error(data.message||data.error||"Não foi possível enviar a foto.");
+    throw new Error(data.message||data.error||"Não foi possível enviar o arquivo.");
   }
 
   try{
@@ -726,7 +778,7 @@ async function uploadPhoto(file,title,description,groupId){
         title,
         description,
         storage_path:path,
-        mime_type:file.type||null,
+        mime_type:mime,
         group_id:groupId
       })
     });
@@ -737,6 +789,23 @@ async function uploadPhoto(file,title,description,groupId){
   }
 }
 
+async function blobDoItem(p){
+  const blob=await fetchPhotoBlob(p.storage_path);
+  // garante o tipo certo (o PDF precisa disso para abrir no visualizador)
+  const tipo=p.mime_type||blob.type;
+  return tipo&&blob.type!==tipo?new Blob([blob],{type:tipo}):blob;
+}
+
+async function baixarArquivo(id){
+  const p=currentPhotos.find(x=>x.id===id);
+  if(!p)return;
+  const url=URL.createObjectURL(await blobDoItem(p));
+  const a=document.createElement("a");
+  a.href=url;a.download=nomeArquivo(p);
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),60000);
+}
+
 // visualizador dentro do próprio site
 async function viewPhoto(id){
   const photo=currentPhotos.find(p=>p.id===id);
@@ -744,8 +813,8 @@ async function viewPhoto(id){
   const wrap=document.createElement("div");
   wrap.className="lightbox";wrap.setAttribute("role","dialog");wrap.setAttribute("aria-modal","true");
   wrap.innerHTML=`<div class="lightbox-topo"><div><div class="item-name">${escapeHtml(photo.title)}</div>${photo.description?`<div class="muted">${escapeHtml(photo.description)}</div>`:""}</div>
-    <div class="nota-acoes"><a class="icone" id="lbOriginal" title="Abrir original" aria-label="Abrir original" target="_blank" rel="noopener" hidden>${ICON.abrir}</a><button class="icone" id="lbFechar" title="Fechar" aria-label="Fechar">${ICON.fechar}</button></div></div>
-    <div class="lightbox-img"><div class="boot-txt">CARREGANDO IMAGEM</div></div>`;
+    <div class="nota-acoes"><a class="icone" id="lbBaixar" title="Baixar" aria-label="Baixar" hidden>${ICON.baixar}</a><a class="icone" id="lbOriginal" title="Abrir em nova aba" aria-label="Abrir em nova aba" target="_blank" rel="noopener" hidden>${ICON.abrir}</a><button class="icone" id="lbFechar" title="Fechar" aria-label="Fechar">${ICON.fechar}</button></div></div>
+    <div class="lightbox-img"><div class="boot-txt">CARREGANDO ARQUIVO</div></div>`;
   document.body.appendChild(wrap);
   let url=null;
   const tecla=e=>{if(e.key==="Escape")fechar()};
@@ -755,11 +824,24 @@ async function viewPhoto(id){
   wrap.querySelector(".lightbox-img").addEventListener("click",e=>{if(e.target.classList.contains("lightbox-img"))fechar()});
   wrap.querySelector("#lbFechar").focus();
   try{
-    const blob=await fetchPhotoBlob(photo.storage_path);
-    url=URL.createObjectURL(blob);
-    const img=new Image();img.src=url;img.alt=photo.title;
-    wrap.querySelector(".lightbox-img").replaceChildren(img);
+    url=URL.createObjectURL(await blobDoItem(photo));
+    const area=wrap.querySelector(".lightbox-img");
+    if(isImagem(photo)){
+      const img=new Image();img.src=url;img.alt=photo.title;
+      area.replaceChildren(img);
+    }else if(isPdf(photo)){
+      const fr=document.createElement("iframe");
+      fr.className="lightbox-pdf";fr.src=url;fr.title=photo.title;
+      area.replaceChildren(fr);
+    }else{
+      area.innerHTML=`<div class="file-preview painel">${ICON.arquivo}<span class="file-ext">${escapeHtml(extensao(photo))}</span>
+        <div class="item-name">${escapeHtml(nomeArquivo(photo))}</div>
+        <div class="muted">Este tipo de arquivo não tem pré-visualização. Baixe para abrir.</div>
+        <button class="btn btn-primary" id="lbBaixarBtn">${ICON.baixar}Baixar arquivo</button></div>`;
+      area.querySelector("#lbBaixarBtn").onclick=()=>baixarArquivo(photo.id).catch(err=>toast(err.message,"erro"));
+    }
     const orig=wrap.querySelector("#lbOriginal");orig.href=url;orig.hidden=false;
+    const bx=wrap.querySelector("#lbBaixar");bx.href=url;bx.download=nomeArquivo(photo);bx.hidden=false;
   }catch(err){fechar();toast(err.message,"erro")}
 }
 
@@ -781,7 +863,7 @@ async function deletePhoto(id){
   });
   const deleted=await parse(metaRes);
   if(!Array.isArray(deleted)||!deleted.some(p=>p.id===id)){
-    throw new Error("O registro da foto não foi excluído. Atualize a página e tente novamente.");
+    throw new Error("O registro não foi excluído. Atualize a página e tente novamente.");
   }
   await loadPhotos();
   loadCounts();

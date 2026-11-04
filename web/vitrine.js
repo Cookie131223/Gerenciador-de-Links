@@ -58,7 +58,7 @@
     ['Diagrama da Sexta-Feira', 'Voz, IA, lembretes e casa', 'g1', 'diagrama', 2],
     ['Rascunho do Meu Hub', 'Primeira ideia das abas', 'g1', 'tela', 9],
     ['Comprovante · curso online', 'Pago no cartão', null, 'recibo', 5],
-  ].map(([title, description, group_id, tipo, d], i) => ({ id: 'p' + i, title, description, group_id, tipo, storage_path: 'vitrine/' + i, created_at: dias(d) }));
+  ].map(([title, description, group_id, tipo, d], i) => ({ id: 'p' + i, title, description, group_id, tipo, storage_path: 'vitrine/' + i, mime_type: 'image/svg+xml', created_at: dias(d) }));
 
   // imagens de exemplo desenhadas aqui mesmo (SVG), no visual do app
   function imagem(p) {
