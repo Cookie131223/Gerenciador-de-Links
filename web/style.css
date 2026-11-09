@@ -172,6 +172,8 @@ a{color:inherit}
 /* ---------- anotações (mural) ---------- */
 .mural{columns:3 280px;column-gap:12px}
 .nota{--c:var(--ink-dim);break-inside:avoid;margin-bottom:12px;padding:16px;display:block;transition:border-color .15s,box-shadow .15s}
+/* backdrop-filter dentro de colunas CSS faz o Chrome/Edge (com GPU) borrar e apagar os cards da 2ª coluna em diante */
+.mural .nota{backdrop-filter:none;-webkit-backdrop-filter:none;background:linear-gradient(180deg,rgba(42,8,13,.94),rgba(26,5,9,.9))}
 .nota:hover{border-color:var(--line-hi)}
 .nota .faixa-topo{position:absolute;left:12px;right:12px;top:0;height:2px;background:linear-gradient(90deg,var(--c),transparent);opacity:.8}
 .nota.fixada{border-color:var(--line-hi);box-shadow:0 0 20px rgba(255,59,59,.14)}
